@@ -4,7 +4,7 @@ Handles stage config CRUD with Redis caching for flow configs.
 """
 
 import json
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from redis.asyncio import Redis
 from loguru import logger
@@ -287,15 +287,15 @@ class StageService:
         """
         for order, stage_id in enumerate(stage_ids):
             await self.db.execute(
-                select(StageConfig)
+                update(StageConfig)
                 .where(
                     StageConfig.tenant_id == tenant_id,
                     StageConfig.stage_id == stage_id,
                 )
-                .update({"stage_order": order})
+                .values(stage_order=order)
             )
 
-        # Invalidate cache
+        await self.db.flush()
         await self._invalidate_cache(tenant_id)
 
         logger.info(

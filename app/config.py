@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     APP_DEBUG: bool = True
     APP_SECRET_KEY: str
     APP_HOST: str = "0.0.0.0"
-    APP_PORT: int = 8000
+    APP_PORT: int = 7860  # default 7860 for HF Spaces compatibility
     FRONTEND_URL: str = "http://localhost:3001"
 
     # --- Database ---
@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_BUCKET: str = "kembang-media"
     MINIO_USE_SSL: bool = False
+
+    # Internal service-to-service auth
+    INTERNAL_API_KEY: str = ""
 
     # --- Rate Limiting ---
     RATE_LIMIT_PER_MINUTE: int = 30

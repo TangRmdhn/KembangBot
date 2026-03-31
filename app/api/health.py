@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import engine, get_db
 from app.db.redis import get_redis
 from app.schemas.common import APIResponse
+from app.core.model_config import get_model_info
 
 router = APIRouter(tags=["health"])
 
@@ -19,7 +20,11 @@ async def health_check() -> APIResponse[dict]:
     """
     return APIResponse(
         success=True,
-        data={"status": "ok", "version": "0.1.0"},
+        data={
+            "status": "ok",
+            "version": "0.1.0",
+            "models": get_model_info(),
+        },
     )
 
 

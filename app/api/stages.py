@@ -18,26 +18,28 @@ router = APIRouter(prefix="/api/v1/stages", tags=["stages"])
 
 
 class ReorderRequest(BaseModel):
-    """Request body for reordering stages."""
-    stage_ids: list[str]  # Ordered list of stage_id strings
+    stage_ids: list[str]
 
 
 class FlowValidationResponse(BaseModel):
-    """Response body for flow validation."""
     valid: bool
     errors: list[str]
     warnings: list[str]
 
 
+class ApplyTemplateRequest(BaseModel):
+    template_id: str
+    agent_name: str = "Asisten Virtual"
+    business_name: str
+    brand_voice: str = "ramah dan profesional"
+
+
 @router.get("/", response_model=APIResponse[list[StageConfigResponse]])
 async def list_stages(
     stage_service: Annotated[StageService, Depends(get_stage_service)],
-    tenant_id: str = Depends(get_current_tenant_id),
+    tenant_id: Annotated[str, Depends(get_current_tenant_id)],
 ) -> APIResponse[list[StageConfigResponse]]:
-    """List all stages for tenant.
-
-    Returns stages ordered by stage_order.
-    """
+    """List semua stages untuk tenant, ordered by stage_order."""
     stages = await stage_service.list_stages(tenant_id)
     return APIResponse(
         success=True,
@@ -49,12 +51,9 @@ async def list_stages(
 async def create_stage(
     data: StageConfigCreate,
     stage_service: Annotated[StageService, Depends(get_stage_service)],
-    tenant_id: str = Depends(get_current_tenant_id),
+    tenant_id: Annotated[str, Depends(get_current_tenant_id)],
 ) -> APIResponse[StageConfigResponse]:
-    """Create a new stage configuration.
-
-    Creates a new stage in the tenant's conversation flow.
-    """
+    """Buat stage baru."""
     stage = await stage_service.create_stage(tenant_id, data)
     return APIResponse(
         success=True,
@@ -63,17 +62,98 @@ async def create_stage(
     )
 
 
+@router.put("/flow", response_model=APIResponse[list[StageConfigResponse]])
+async def save_full_flow(
+    stages: list[StageConfigCreate],
+    stage_service: Annotated[StageService, Depends(get_stage_service)],
+    tenant_id: Annotated[str, Depends(get_current_tenant_id)],
+) -> APIResponse[list[StageConfigResponse]]:
+    """Replace seluruh stage flow sekaligus."""
+    result = await stage_service.replace_all_stages(tenant_id, stages)
+    return APIResponse(
+        success=True,
+        data=[StageConfigResponse.model_validate(s) for s in result],
+        message="Flow saved successfully",
+    )
+
+
+@router.get("/flow-config", response_model=APIResponse[FlowConfigResponse])
+async def get_flow_config(
+    stage_service: Annotated[StageService, Depends(get_stage_service)],
+    tenant_id: Annotated[str, Depends(get_current_tenant_id)],
+) -> APIResponse[FlowConfigResponse]:
+    """Get compiled flow config untuk LangGraph engine."""
+    config = await stage_service.get_flow_config(tenant_id)
+    return APIResponse(
+        success=True,
+        data=FlowConfigResponse.model_validate(config),
+    )
+
+
+@router.get("/templates", response_model=APIResponse[list])
+async def list_templates(
+    tenant_id: Annotated[str, Depends(get_current_tenant_id)],
+) -> APIResponse[list]:
+    """List template flow yang tersedia."""
+    from app.services.template import TemplateService
+    from app.db.redis import get_redis
+    redis = await get_redis()
+    service = TemplateService(db=None, redis=redis)
+    return APIResponse(success=True, data=service.list_templates())
+
+
+@router.post("/apply-template", response_model=APIResponse[list[StageConfigResponse]])
+async def apply_template(
+    body: ApplyTemplateRequest,
+    stage_service: Annotated[StageService, Depends(get_stage_service)],
+    tenant_id: Annotated[str, Depends(get_current_tenant_id)],
+) -> APIResponse[list[StageConfigResponse]]:
+    """Apply template flow ke tenant. Menggantikan semua stage yang ada."""
+    from app.services.template import TemplateService
+    from app.db.redis import get_redis
+    redis = await get_redis()
+    template_service = TemplateService(db=stage_service.db, redis=redis)
+    try:
+        stages = await template_service.apply_template(
+            tenant_id=tenant_id,
+            template_id=body.template_id,
+            agent_name=body.agent_name,
+            business_name=body.business_name,
+            brand_voice=body.brand_voice,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return APIResponse(
+        success=True,
+        data=[StageConfigResponse.model_validate(s) for s in stages],
+        message=f"Template '{body.template_id}' berhasil diterapkan",
+    )
+
+
+@router.post("/reorder", response_model=APIResponse[list[StageConfigResponse]])
+async def reorder_stages(
+    body: ReorderRequest,
+    stage_service: Annotated[StageService, Depends(get_stage_service)],
+    tenant_id: Annotated[str, Depends(get_current_tenant_id)],
+) -> APIResponse[list[StageConfigResponse]]:
+    """Reorder stages dengan mengirim stage_ids dalam urutan yang diinginkan."""
+    await stage_service.reorder_stages(tenant_id, body.stage_ids)
+    stages = await stage_service.list_stages(tenant_id)
+    return APIResponse(
+        success=True,
+        data=[StageConfigResponse.model_validate(s) for s in stages],
+        message="Stages reordered successfully",
+    )
+
+
 @router.put("/{stage_id}", response_model=APIResponse[StageConfigResponse])
 async def update_stage(
     stage_id: str,
     data: StageConfigUpdate,
     stage_service: Annotated[StageService, Depends(get_stage_service)],
-    tenant_id: str = Depends(get_current_tenant_id),
+    tenant_id: Annotated[str, Depends(get_current_tenant_id)],
 ) -> APIResponse[StageConfigResponse]:
-    """Update an existing stage configuration.
-
-    Partially updates stage fields. Only provided fields are updated.
-    """
+    """Update stage configuration."""
     stage = await stage_service.update_stage(tenant_id, stage_id, data)
     return APIResponse(
         success=True,
@@ -86,128 +166,40 @@ async def update_stage(
 async def delete_stage(
     stage_id: str,
     stage_service: Annotated[StageService, Depends(get_stage_service)],
-    tenant_id: str = Depends(get_current_tenant_id),
+    tenant_id: Annotated[str, Depends(get_current_tenant_id)],
 ) -> None:
-    """Delete a stage configuration.
-
-    Removes the stage from the tenant's conversation flow.
-    """
+    """Hapus stage configuration."""
     await stage_service.delete_stage(tenant_id, stage_id)
-
-
-@router.post("/reorder", response_model=APIResponse[list[StageConfigResponse]])
-async def reorder_stages(
-    body: ReorderRequest,
-    stage_service: Annotated[StageService, Depends(get_stage_service)],
-    tenant_id: str = Depends(get_current_tenant_id),
-) -> APIResponse[list[StageConfigResponse]]:
-    """Reorder stages by providing the stage_ids in desired order.
-
-    Args:
-        body: Reorder request with ordered stage IDs.
-        stage_service: Stage service dependency.
-        tenant_id: Tenant ID from auth.
-
-    Returns:
-        Updated list of stages.
-    """
-    await stage_service.reorder_stages(tenant_id, body.stage_ids)
-    stages = await stage_service.list_stages(tenant_id)
-    return APIResponse(
-        success=True,
-        data=[StageConfigResponse.model_validate(s) for s in stages],
-        message="Stages reordered successfully",
-    )
-
-
-@router.put("/flow", response_model=APIResponse[list[StageConfigResponse]])
-async def save_full_flow(
-    stages: list[StageConfigCreate],
-    stage_service: Annotated[StageService, Depends(get_stage_service)],
-    tenant_id: str = Depends(get_current_tenant_id),
-) -> APIResponse[list[StageConfigResponse]]:
-    """Save the entire stage flow at once (replaces all existing stages).
-
-    Used by the flow builder when the user clicks "Save".
-    This is a full replacement — all existing stages are deleted and
-    replaced with the provided list.
-
-    The stage_order is determined by the list index (0, 1, 2...).
-
-    Args:
-        stages: List of stage configs to save.
-        stage_service: Stage service dependency.
-        tenant_id: Tenant ID from auth.
-
-    Returns:
-        List of created stages.
-    """
-    result = await stage_service.replace_all_stages(tenant_id, stages)
-    return APIResponse(
-        success=True,
-        data=[StageConfigResponse.model_validate(s) for s in result],
-        message="Flow saved successfully",
-    )
-
-
-@router.get("/flow-config", response_model=APIResponse[FlowConfigResponse])
-async def get_flow_config(
-    stage_service: Annotated[StageService, Depends(get_stage_service)],
-    tenant_id: str = Depends(get_current_tenant_id),
-) -> APIResponse[FlowConfigResponse]:
-    """Get compiled flow configuration.
-
-    Returns the full flow config used by LangGraph engine.
-    """
-    config = await stage_service.get_flow_config(tenant_id)
-    return APIResponse(
-        success=True,
-        data=FlowConfigResponse.model_validate(config),
-    )
 
 
 @router.post("/validate", response_model=FlowValidationResponse)
 async def validate_flow(
     stages: list[StageConfigCreate],
-    tenant_id: str = Depends(get_current_tenant_id),
+    tenant_id: Annotated[str, Depends(get_current_tenant_id)],
 ) -> FlowValidationResponse:
-    """Validate a flow configuration without saving it.
-
-    Checks:
-    - At least one stage exists
-    - All next_stage references point to valid stage_ids
-    - No circular references (basic check)
-    - All stage_ids are unique
-    - First stage has no required_fields (greeting should be open)
-
-    Args:
-        stages: List of stage configs to validate.
-        tenant_id: Tenant ID from auth.
-
-    Returns:
-        Validation result with errors and warnings.
-    """
+    """Validasi flow config tanpa menyimpannya."""
     errors = []
     warnings = []
     stage_ids = [s.stage_id for s in stages]
 
     if not stages:
         errors.append("Flow must have at least one stage")
-
     if len(stage_ids) != len(set(stage_ids)):
         errors.append("Duplicate stage_id found")
 
     for stage in stages:
         if stage.next_stage and stage.next_stage not in stage_ids:
-            errors.append(f"Stage '{stage.stage_id}' references unknown next_stage '{stage.next_stage}'")
+            errors.append(
+                f"Stage '{stage.stage_id}' references unknown next_stage '{stage.next_stage}'"
+            )
         if stage.fallback_stage and stage.fallback_stage not in stage_ids:
-            warnings.append(f"Stage '{stage.stage_id}' references unknown fallback_stage '{stage.fallback_stage}'")
+            warnings.append(
+                f"Stage '{stage.stage_id}' references unknown fallback_stage '{stage.fallback_stage}'"
+            )
 
     if stages and stages[0].required_fields:
-        warnings.append("First stage has required_fields — consider removing them for a natural greeting")
+        warnings.append(
+            "First stage has required_fields — consider removing them for a natural greeting"
+        )
 
-    return FlowValidationResponse(
-        valid=len(errors) == 0,
-        errors=errors,
-        warnings=warnings,
-    )
+    return FlowValidationResponse(valid=len(errors) == 0, errors=errors, warnings=warnings)

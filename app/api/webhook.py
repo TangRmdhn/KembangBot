@@ -4,6 +4,8 @@ Receives incoming WhatsApp messages via WAHA webhook and processes
 them through the LangGraph conversation engine.
 """
 
+from typing import Annotated
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from loguru import logger
 
@@ -15,6 +17,12 @@ from app.services.waha import WAHAClient
 from app.services.stage import StageService
 from app.agents.graph import invoke_conversation_graph
 from app.schemas.webhook import WAHAWebhookEvent
+from app.dependencies import (
+    get_tenant_service,
+    get_conversation_service,
+    get_stage_service,
+    get_waha_client,
+)
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
@@ -23,10 +31,10 @@ router = APIRouter(prefix="/webhook", tags=["webhook"])
 async def handle_waha_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
-    tenant_service: TenantService = Depends(),
-    conversation_service: ConversationService = Depends(),
-    stage_service: StageService = Depends(),
-    waha_client: WAHAClient = Depends(),
+    tenant_service: Annotated[TenantService, Depends(get_tenant_service)],
+    conversation_service: Annotated[ConversationService, Depends(get_conversation_service)],
+    stage_service: Annotated[StageService, Depends(get_stage_service)],
+    waha_client: Annotated[WAHAClient, Depends(get_waha_client)],
 ) -> dict:
     """Handle incoming WAHA webhook events.
 
@@ -144,6 +152,41 @@ async def process_message(
         waha_client: WAHA client.
     """
     try:
+        # Idempotency check — FIRST, before anything else
+        if waha_message_id:
+            from app.db.redis import get_redis
+            redis = await get_redis()
+            dedup_key = f"kembang:dedup:{waha_message_id}"
+            is_new = await redis.set(dedup_key, "1", nx=True, ex=3600)  # TTL 1 hour
+            if not is_new:
+                logger.info(
+                    "Duplicate webhook ignored",
+                    waha_message_id=waha_message_id,
+                    tenant_id=tenant_id,
+                )
+                return
+
+        # Rate limit check
+        from app.db.redis import get_redis
+        from app.core.utils import check_rate_limit
+        from app.config import settings
+
+        redis = await get_redis()
+        allowed = await check_rate_limit(
+            redis=redis,
+            tenant_id=tenant_id,
+            customer_phone=clean_phone(customer_phone),
+            limit_per_minute=settings.RATE_LIMIT_PER_MINUTE,
+        )
+
+        if not allowed:
+            logger.warning(
+                "Rate limit exceeded",
+                tenant_id=tenant_id,
+                customer_phone=clean_phone(customer_phone),
+            )
+            return
+
         # Get or create conversation
         conversation = await conversation_service.get_or_create(
             tenant_id=tenant_id,
@@ -194,6 +237,24 @@ async def process_message(
         # Mark for handoff if needed
         if needs_handoff:
             await conversation_service.mark_handoff(str(conversation.id))
+
+        # Save pending lead if present (from save_lead_info tool)
+        pending_lead = result.get("pending_lead")
+        if pending_lead and pending_lead.get("__lead_data__"):
+            from app.services.lead import LeadService
+            from app.schemas.lead import LeadCreate
+            lead_service = LeadService(db=conversation_service.db)
+            await lead_service.create(
+                tenant_id=tenant_id,
+                data=LeadCreate(
+                    customer_phone=pending_lead.get("customer_phone", customer_phone),
+                    customer_name=pending_lead.get("customer_name"),
+                    notes=pending_lead.get("notes"),
+                    estimated_value=pending_lead.get("estimated_value"),
+                    conversation_id=str(conversation.id),
+                ),
+            )
+            logger.info("Lead saved from pending state", tenant_id=tenant_id)
 
         # Send response via WAHA
         chat_id = to_waha_chat_id(clean_phone(customer_phone))

@@ -106,6 +106,51 @@ async def check_pricing_rules(
 
 
 @tool
+async def search_knowledge_base(query: str, tenant_id: str) -> str:
+    """Search tenant knowledge base for FAQ, policies, and business information.
+
+    Use this tool when:
+    - Customer asks about store policies (return, warranty, etc)
+    - Customer asks FAQ questions not in product catalog
+    - Customer needs information about how the service works
+    - Questions that need answers based on tenant business documents
+
+    DO NOT use for finding products/prices — use search_catalog instead.
+
+    Args:
+        query: Customer question in natural language.
+        tenant_id: Tenant UUID (from system context, don't ask customer).
+
+    Returns:
+        Relevant information from tenant knowledge base, or message if not found.
+    """
+    from app.db.session import async_session_factory
+    from app.services.document import DocumentService
+
+    logger.info("Tool search_knowledge_base called", tenant_id=tenant_id, query=query[:80])
+
+    async with async_session_factory() as db:
+        service = DocumentService(db=db)
+        results = await service.search_knowledge_base(
+            tenant_id=tenant_id,
+            query=query,
+            limit=4,
+        )
+
+    if not results:
+        return "Tidak ditemukan informasi yang relevan di knowledge base kami."
+
+    formatted = []
+    for r in results:
+        source = r.get("source", "")
+        content = r.get("content", "")
+        source_label = f" (dari: {source})" if source else ""
+        formatted.append(f"{content}{source_label}")
+
+    return "\n\n---\n\n".join(formatted)
+
+
+@tool
 async def save_lead_info(
     tenant_id: str,
     customer_phone: str,
@@ -113,50 +158,40 @@ async def save_lead_info(
     notes: str | None = None,
     estimated_value: float | None = None,
 ) -> str:
-    """Save or update lead information when customer shares contact details or shows purchase intent.
+    """Simpan informasi lead ketika customer memberikan data kontak atau menunjukkan minat beli.
 
-    Use this tool when:
-    - Customer provides their name
-    - Customer shows strong interest in a product/service
-    - You have enough information to create a lead record
-    - Customer provides additional contact details
+    Gunakan tool ini ketika:
+    - Customer menyebut namanya
+    - Customer menunjukkan minat kuat terhadap produk/layanan
+    - Customer memberikan informasi kontak tambahan
 
     Args:
-        tenant_id: The tenant UUID.
-        customer_phone: Customer's WhatsApp phone number.
-        customer_name: Customer's name if provided.
-        notes: Any relevant notes about the lead (interest, preferences).
-        estimated_value: Estimated deal value in IDR if determinable.
+        tenant_id: UUID tenant (dari system context).
+        customer_phone: Nomor WhatsApp customer.
+        customer_name: Nama customer jika disebutkan.
+        notes: Catatan tentang kebutuhan atau preferensi customer.
+        estimated_value: Estimasi nilai deal dalam IDR jika bisa ditentukan.
 
     Returns:
-        Confirmation message with lead ID.
+        Konfirmasi bahwa data sudah dicatat.
     """
-    from app.db.session import async_session_factory
-    from app.services.lead import LeadService
-    from app.schemas.lead import LeadCreate
-
     logger.info(
         "Tool save_lead_info called",
         tenant_id=tenant_id,
         customer_phone=customer_phone,
         customer_name=customer_name,
-        estimated_value=estimated_value,
     )
 
-    async with async_session_factory() as db:
-        service = LeadService(db=db)
-        lead = await service.create(
-            tenant_id=tenant_id,
-            data=LeadCreate(
-                customer_phone=customer_phone,
-                customer_name=customer_name,
-                notes=notes,
-                estimated_value=estimated_value,
-            ),
-        )
-        await db.commit()
-
-    return f"Data Kakak sudah kami simpan (Lead ID: {str(lead.id)[:8]}). Tim kami akan menghubungi Kakak segera jika ada yang perlu dikonfirmasi."
+    # Tidak simpan ke DB di sini — kembalikan data untuk disimpan
+    # oleh webhook handler dalam transaction yang sama
+    return json.dumps({
+        "__lead_data__": True,  # marker untuk webhook handler
+        "tenant_id": tenant_id,
+        "customer_phone": customer_phone,
+        "customer_name": customer_name,
+        "notes": notes,
+        "estimated_value": estimated_value,
+    })
 
 
 def get_tools() -> list:
@@ -165,4 +200,4 @@ def get_tools() -> list:
     Returns:
         List of tool functions bound to the LangChain LLM.
     """
-    return [search_catalog, check_pricing_rules, save_lead_info]
+    return [search_catalog, search_knowledge_base, check_pricing_rules, save_lead_info]

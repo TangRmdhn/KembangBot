@@ -65,3 +65,5 @@ class ConversationState(TypedDict):
     formatted_output: str
     needs_human_handoff: bool
     handoff_reason: str
+    # Pending lead data — set by save_lead_info tool, saved to DB by webhook handler
+    pending_lead: dict | None

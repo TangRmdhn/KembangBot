@@ -188,6 +188,7 @@ async def invoke_conversation_graph(
         "formatted_output": "",
         "needs_human_handoff": False,
         "handoff_reason": "",
+        "pending_lead": None,
     }
 
     try:

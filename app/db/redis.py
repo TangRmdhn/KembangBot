@@ -17,15 +17,23 @@ async def init_redis() -> None:
     """Initialize Redis connection. Call on app startup.
 
     Creates a Redis client and verifies connectivity with a PING command.
+    Upstash uses rediss:// (with SSL) - redis-py handles this automatically.
     """
     global redis_client
     redis_client = from_url(
         settings.REDIS_URL,
         encoding="utf-8",
         decode_responses=True,
+        socket_connect_timeout=5,
+        socket_timeout=5,
+        retry_on_timeout=True,
     )
-    await redis_client.ping()
-    logger.info("Redis connection established")
+    try:
+        await redis_client.ping()
+        logger.info("Redis connection established", url=settings.REDIS_URL[:30] + "...")
+    except Exception as e:
+        logger.error("Redis connection failed", error=str(e))
+        raise
 
 
 async def close_redis() -> None:

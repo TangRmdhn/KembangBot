@@ -1,0 +1,27 @@
+{
+  "template_name": "QnA Mode",
+  "template_description": "Template untuk bisnis yang ingin bot menjawab pertanyaan customer saja. Cocok untuk toko online, layanan, atau bisnis apapun yang butuh bot FAQ cepat.",
+  "tenant": null,
+  "stages": [
+    {
+      "stage_id": "greeting",
+      "stage_name": "Salam Pembuka",
+      "stage_order": 0,
+      "goal": "Menyapa customer dan siap menjawab pertanyaan",
+      "instructions": "Sapa customer dengan ramah. Perkenalkan diri sebagai asisten virtual bisnis ini. Tanyakan apa yang ingin mereka ketahui atau butuhkan. Jika customer langsung bertanya, langsung jawab tanpa basa-basi berlebihan.",
+      "required_fields": [],
+      "next_stage": "qna",
+      "fallback_stage": "greeting"
+    },
+    {
+      "stage_id": "qna",
+      "stage_name": "Tanya Jawab",
+      "stage_order": 1,
+      "goal": "Jawab semua pertanyaan customer secara akurat dan helpful",
+      "instructions": "Jawab pertanyaan customer menggunakan informasi dari tool yang tersedia:\n- Gunakan search_catalog untuk pertanyaan tentang produk, harga, dan ketersediaan\n- Gunakan search_knowledge_base untuk pertanyaan FAQ, kebijakan, cara kerja layanan\n- Jika tidak ada informasi yang relevan di kedua tool, jujur bahwa kamu tidak punya informasi tersebut dan tawarkan untuk menghubungkan ke tim\n- Jawab dengan ringkas dan jelas\n- Jangan mengarang informasi yang tidak ada di knowledge base atau catalog\n- Jika customer mau beli/pesan, kumpulkan informasi dasar (nama, kontak) dan simpan menggunakan save_lead_info",
+      "required_fields": [],
+      "next_stage": null,
+      "fallback_stage": "qna"
+    }
+  ]
+}

@@ -59,6 +59,10 @@ class Tenant(Base):
         back_populates="tenant",
         cascade="all, delete-orphan",
     )
+    documents: Mapped[list["TenantDocument"]] = relationship(
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Tenant id={self.id} name={self.business_name}>"

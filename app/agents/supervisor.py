@@ -8,24 +8,15 @@ route to next. It does NOT generate customer-facing responses.
 
 import json
 from loguru import logger
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from app.agents.state import ConversationState
 from app.agents.prompts import build_field_extraction_prompt, build_intent_classification_prompt
-
-
-# Use a smaller/cheaper model for supervisor tasks (classification + extraction)
-# These are structured tasks that don't need the full GPT-4o
-supervisor_llm = ChatOpenAI(
-    model="gpt-4o-mini",
-    temperature=0.0,  # Deterministic for classification
-    max_tokens=500,    # Supervisor responses are short
-)
+from app.core.model_config import supervisor_llm
 
 
 async def _extract_fields_from_response(
-    llm: ChatOpenAI,
+    llm,
     missing_fields: list[str],
     agent_response: str,
     customer_message: str,

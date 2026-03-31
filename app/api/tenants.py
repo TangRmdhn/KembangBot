@@ -30,11 +30,10 @@ async def create_tenant(
 
 @router.get("/", response_model=PaginatedResponse[TenantResponse])
 async def list_tenants(
+    tenant_service: Annotated[TenantService, Depends(get_tenant_service)],
+    tenant_id: Annotated[str, Depends(get_current_tenant_id)],
     page: int = 1,
     per_page: int = 20,
-    tenant_service: Annotated[TenantService, Depends(get_tenant_service)],
-    # Auth required for dashboard
-    tenant_id: str = Depends(get_current_tenant_id),
 ) -> PaginatedResponse[TenantResponse]:
     """List all tenants with pagination.
 

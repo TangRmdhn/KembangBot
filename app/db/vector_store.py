@@ -6,16 +6,9 @@ for product catalog semantic search.
 
 from loguru import logger
 from langchain_postgres import PGVector
-from langchain_openai import OpenAIEmbeddings
 
 from app.config import settings
-
-
-# Module-level embedding model (reusable, stateless)
-_embeddings = OpenAIEmbeddings(
-    model="text-embedding-3-small",
-    openai_api_key=settings.OPENAI_API_KEY,
-)
+from app.core.model_config import embeddings as _embeddings
 
 
 def get_vector_store(tenant_id: str) -> PGVector:
@@ -42,12 +35,3 @@ def get_vector_store(tenant_id: str) -> PGVector:
         connection=settings.DATABASE_URL_SYNC,  # langchain-postgres uses sync psycopg3
         use_jsonb=True,
     )
-
-
-def get_embeddings() -> OpenAIEmbeddings:
-    """Return the shared embedding model instance.
-
-    Returns:
-        OpenAIEmbeddings instance for generating embeddings.
-    """
-    return _embeddings

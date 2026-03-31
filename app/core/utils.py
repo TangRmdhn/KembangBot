@@ -7,6 +7,33 @@ import json
 import uuid
 from typing import Any
 
+from redis.asyncio import Redis
+
+
+async def check_rate_limit(
+    redis: Redis,
+    tenant_id: str,
+    customer_phone: str,
+    limit_per_minute: int,
+) -> bool:
+    """Check whether customer has exceeded rate limit.
+
+    Args:
+        redis: Redis client instance.
+        tenant_id: Tenant UUID.
+        customer_phone: Customer's phone number.
+        limit_per_minute: Maximum messages per minute.
+
+    Returns:
+        True if within limit (can proceed).
+        False if exceeded limit (should reject).
+    """
+    key = f"kembang:rl:{tenant_id}:{customer_phone}"
+    count = await redis.incr(key)
+    if count == 1:
+        await redis.expire(key, 60)  # TTL 60 seconds
+    return count <= limit_per_minute
+
 
 def mask_phone(phone: str) -> str:
     """Mask phone number for logging purposes.

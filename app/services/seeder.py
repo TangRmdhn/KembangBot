@@ -29,7 +29,8 @@ class SeederService:
     def __init__(self, db: AsyncSession, redis: Redis):
         self.db = db
         self.redis = redis
-        self.seeds_dir = Path(__file__).parent.parent / "seeds"
+        # Seeds folder is at backend/seeds/, not backend/app/seeds/
+        self.seeds_dir = Path(__file__).parent.parent.parent / "seeds"
 
     async def seed_demo_data(self) -> dict:
         """Seed demo tenants with stage configs and products.
@@ -159,20 +160,16 @@ class SeederService:
 
 async def main():
     """Run seeder directly for CLI usage."""
-    import asyncio
     from app.db.session import async_session_factory
     from app.db.redis import redis_client, init_redis
 
-    async def run_seed():
-        # Init Redis
-        await init_redis()
+    # Init Redis
+    await init_redis()
 
-        async with async_session_factory() as db:
-            seeder = SeederService(db=db, redis=redis_client)
-            result = await seeder.seed_demo_data()
-            print(f"Seeding complete: {result}")
-
-    asyncio.run(run_seed())
+    async with async_session_factory() as db:
+        seeder = SeederService(db=db, redis=redis_client)
+        result = await seeder.seed_demo_data()
+        print(f"Seeding complete: {result}")
 
 
 if __name__ == "__main__":

@@ -6,7 +6,6 @@ instructions, collected data, and available tools.
 """
 
 from loguru import logger
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import (
     SystemMessage,
     AIMessage,
@@ -17,14 +16,7 @@ from langchain_core.messages import (
 from app.agents.state import ConversationState
 from app.agents.prompts import build_system_prompt
 from app.agents.tools import get_tools
-
-
-# Main conversation model — cost-effective for MVP
-agent_llm = ChatOpenAI(
-    model="gpt-4o-mini",
-    temperature=0.7,  # More creative for natural conversation
-    max_tokens=500,   # WhatsApp messages should be concise
-)
+from app.core.model_config import agent_llm
 
 
 async def conversation_agent_node(state: ConversationState) -> dict:

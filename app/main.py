@@ -43,9 +43,10 @@ def create_app() -> FastAPI:
     )
 
     # Add CORS middleware
+    # For HF Spaces testing - accept all origins (restrict after production)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if settings.is_development else [settings.FRONTEND_URL],
+        allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

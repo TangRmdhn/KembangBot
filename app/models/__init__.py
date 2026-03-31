@@ -10,6 +10,7 @@ from app.models.message import Message
 from app.models.stage_config import StageConfig
 from app.models.lead import Lead
 from app.models.product import Product
+from app.models.document import TenantDocument
 
 __all__ = [
     "Base",
@@ -19,4 +20,5 @@ __all__ = [
     "StageConfig",
     "Lead",
     "Product",
+    "TenantDocument",
 ]
