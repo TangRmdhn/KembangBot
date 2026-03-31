@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     WAHA_BASE_URL: str
     WAHA_API_KEY: str = ""
     WAHA_WEBHOOK_SECRET: str
+    WAHA_MOCK_MODE: bool = False  # Set to True for testing without WAHA server
 
     # --- OpenAI ---
     OPENAI_API_KEY: str

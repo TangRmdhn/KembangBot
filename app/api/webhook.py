@@ -62,6 +62,13 @@ async def handle_waha_webhook(
     data = await request.json()
     event = WAHAWebhookEvent(**data)
 
+    # Handle session events (QR authentication)
+    if event.event == "session":
+        return await handle_session_event(
+            event=event,
+            tenant_service=tenant_service,
+        )
+
     # Only process message events
     if event.event != "message":
         logger.debug("Ignoring non-message event", event=event.event)
@@ -116,6 +123,68 @@ async def handle_waha_webhook(
         from_phone=clean_phone(from_phone),
         message_length=len(body),
     )
+
+    return {"ok": True}
+
+
+async def handle_session_event(
+    event: WAHAWebhookEvent,
+    tenant_service: TenantService,
+) -> dict:
+    """Handle WAHA session events (QR authentication).
+
+    When a user scans the QR code, WAHA sends a session event with
+    authentication status. This handler completes the tenant creation.
+
+    Args:
+        event: WAHA webhook event.
+        tenant_service: Tenant service instance.
+
+    Returns:
+        Success response dict.
+    """
+    payload = event.payload
+    session = event.session
+    status = payload.get("status")
+
+    logger.info(
+        "Session event received",
+        session=session,
+        status=status,
+    )
+
+    # Handle authenticated status
+    if status in ["CONNECTED", "AUTHENTICATED", "opened"]:
+        # Extract phone number from payload
+        phone_info = payload.get("phone", {})
+        phone_number = phone_info.get("wa_id") or phone_info.get("waid")
+
+        if not phone_number:
+            # Try alternative field
+            phone_number = payload.get("phoneNumber") or payload.get("phone_number")
+
+        if phone_number:
+            # Complete QR authentication and create tenant
+            tenant = await tenant_service.complete_qr_authentication(
+                session_id=session,
+                phone_number=phone_number,
+            )
+
+            if tenant:
+                logger.info(
+                    "QR authentication completed via webhook",
+                    session=session,
+                    tenant_id=str(tenant.id),
+                    phone_number=phone_number,
+                )
+                return {"ok": True}
+            else:
+                logger.warning(
+                    "QR session not found (might be existing tenant)",
+                    session=session,
+                )
+        else:
+            logger.warning("No phone number in session event", session=session)
 
     return {"ok": True}
 

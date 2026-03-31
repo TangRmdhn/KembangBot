@@ -4,13 +4,15 @@ Handles tenant CRUD operations with Redis caching for session lookups.
 """
 
 import json
+import uuid
+from datetime import datetime, timedelta
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from redis.asyncio import Redis
 from loguru import logger
 
 from app.models.tenant import Tenant
-from app.schemas.tenant import TenantCreate, TenantUpdate
+from app.schemas.tenant import TenantCreate, TenantUpdate, QRSessionRequest
 from app.core.exceptions import TenantNotFoundError
 
 
@@ -25,6 +27,125 @@ class TenantService:
     def __init__(self, db: AsyncSession, redis: Redis):
         self.db = db
         self.redis = redis
+
+    async def create_qr_session(self, data: QRSessionRequest) -> dict:
+        """Create a new QR session for tenant onboarding.
+
+        Generates a unique session ID and stores temporary session data
+        in Redis for QR code authentication flow.
+
+        Args:
+            data: QR session request data.
+
+        Returns:
+            Session ID and temporary token for QR polling.
+        """
+        session_id = f"session_{uuid.uuid4().hex[:12]}"
+        temp_token = uuid.uuid4().hex
+
+        # Store temporary session data in Redis (expires in 10 minutes)
+        session_data = {
+            "business_name": data.business_name,
+            "agent_name": data.agent_name,
+            "brand_voice": data.brand_voice,
+            "business_type": data.business_type,
+            "status": "pending",
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        session_key = f"kembang:qr_session:{session_id}"
+        await self.redis.setex(session_key, 600, json.dumps(session_data))
+
+        # Store token -> session_id mapping for polling
+        token_key = f"kembang:qr_token:{temp_token}"
+        await self.redis.setex(token_key, 600, session_id)
+
+        logger.info(
+            "QR session created",
+            session_id=session_id,
+            business_name=data.business_name,
+        )
+
+        return {
+            "session_id": session_id,
+            "temp_token": temp_token,
+            "expires_at": datetime.utcnow() + timedelta(minutes=10),
+        }
+
+    async def get_qr_session_status(self, session_id: str) -> dict | None:
+        """Get QR session authentication status.
+
+        Args:
+            session_id: WAHA session identifier.
+
+        Returns:
+            Session status info or None if not found.
+        """
+        session_key = f"kembang:qr_session:{session_id}"
+        cached = await self.redis.get(session_key)
+
+        if not cached:
+            return None
+
+        session_data = json.loads(cached)
+        return {
+            "session_id": session_id,
+            "status": session_data.get("status", "pending"),
+            "business_name": session_data.get("business_name"),
+            "phone_number": session_data.get("phone_number"),
+            "authenticated_at": session_data.get("authenticated_at"),
+        }
+
+    async def complete_qr_authentication(
+        self, session_id: str, phone_number: str
+    ) -> Tenant | None:
+        """Complete QR authentication and create tenant.
+
+        Called when WAHA webhook confirms successful QR scan.
+
+        Args:
+            session_id: WAHA session identifier.
+            phone_number: WhatsApp phone number from WAHA.
+
+        Returns:
+            Created Tenant or None if session not found.
+        """
+        session_key = f"kembang:qr_session:{session_id}"
+        cached = await self.redis.get(session_key)
+
+        if not cached:
+            logger.warning("QR session not found", session_id=session_id)
+            return None
+
+        session_data = json.loads(cached)
+
+        # Create tenant
+        tenant_data = TenantCreate(
+            business_name=session_data["business_name"],
+            waha_session_id=session_id,
+            agent_name=session_data.get("agent_name", "AI Assistant"),
+            brand_voice=session_data.get("brand_voice"),
+            business_type=session_data.get("business_type", "general"),
+            phone_number=phone_number,
+        )
+
+        tenant = Tenant(**tenant_data.model_dump())
+        self.db.add(tenant)
+        await self.db.flush()
+
+        # Update session status
+        session_data["status"] = "authenticated"
+        session_data["phone_number"] = phone_number
+        session_data["authenticated_at"] = datetime.utcnow().isoformat()
+        await self.redis.setex(session_key, 3600, json.dumps(session_data))
+
+        logger.info(
+            "QR authentication completed, tenant created",
+            session_id=session_id,
+            tenant_id=str(tenant.id),
+            phone_number=phone_number,
+        )
+
+        return tenant
 
     async def get_by_session(self, session_id: str) -> Tenant | None:
         """Lookup tenant by WAHA session ID.
